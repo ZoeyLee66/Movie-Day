@@ -6,6 +6,29 @@ import ParallaxScrollView from '@/components/parallax-scroll-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Link } from 'expo-router';
+import defaultAll from '../../assets/images/icons/defaultAll.png';
+import apple from '../../assets/images/icons/apple.png';
+import appleGenre from '../../assets/images/icons/appleGenre.png';
+import appleSort from '../../assets/images/icons/appleSort.png';
+import appleStar from '../../assets/images/icons/appleStar.png';
+import defaultUser from '../../assets/images/icons/default.png';
+import defaultFullStar from '../../assets/images/icons/defaultFullStar.png';
+import defaultStar from '../../assets/images/icons/defaultStar.png';
+import defaultGenre from '../../assets/images/icons/defaultGenre.png';
+import defaultSort from '../../assets/images/icons/defaultSort.png';
+import disney from '../../assets/images/icons/disney.png';
+import disneyGenre from '../../assets/images/icons/disneyGenre.png';
+import disneySort from '../../assets/images/icons/disneySort.png';
+import disneyStar from '../../assets/images/icons/disneyStar.png';
+import netflixGenre from '../../assets/images/icons/netflixGenre.png';
+import netflix from '../../assets/images/icons/netflix.png';
+import netflixSort from '../../assets/images/icons/netflixSort.png';
+import netflixStar from '../../assets/images/icons/netflixStar.png';
+import selectedAppleLogo from '../../assets/images/icons/selectedAppleLogo.png';
+import selectedDisneyLogo from '../../assets/images/icons/selectedDisneyLogo.png';
+import selectedNetflixLogo from '../../assets/images/icons/selectedNetflixLogo.png';
+import seletedDefaultAll from '../../assets/images/icons/apple.png';
+
 
 export default function HomeScreen() {
   return (
