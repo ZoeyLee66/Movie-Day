@@ -1,6 +1,6 @@
 import { Stack } from 'expo-router';
 import 'react-native-reanimated';
-import { initDatabase } from '../db/database';
+import { initDatabase, resetUserRatings, getUserRatingsCount } from '../db/database';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 
@@ -15,6 +15,8 @@ export default function RootLayout() {
     const setupDatabase = async () => {
       try {
         await initDatabase();
+        // await resetUserRatings();
+        await getUserRatingsCount();
         setIsDbReady(true);
       } catch (error) {
         console.error('Database initialization failed:', error);

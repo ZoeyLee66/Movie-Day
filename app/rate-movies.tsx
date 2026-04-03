@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import {
     View,
     Text,
@@ -8,14 +8,19 @@ import {
     Image,
     ActivityIndicator,
     StyleSheet,
+    NativeScrollEvent,
+    NativeSyntheticEvent,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
-import { getUnratedMovies, getUserRatingsCount } from '../db/database';
+import { getUserRatingsCount, getAllMovies } from '../db/database';
 import {
     useFonts,
     JockeyOne_400Regular,
 } from '@expo-google-fonts/jockey-one';
+
+let cachedMovieOrder: number[] = [];
+let cachedScrollOffset = 0;
 
 type Movie = {
     movie_id: number;
@@ -34,13 +39,41 @@ type Movie = {
     ca_disney_plus: number;
 };
 
-function shuffleMovies<T>(array: T[]): T[] {
-    const shuffled = [...array];
-    for (let i = shuffled.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+function orderMoviesOnce(allMovies: Movie[]): Movie[] {
+    if (cachedMovieOrder.length === 0) {
+        const shuffled = [...allMovies];
+
+        for (let i = shuffled.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+        }
+
+        cachedMovieOrder = shuffled.map((movie) => movie.movie_id);
+        return shuffled;
     }
-    return shuffled;
+
+    const movieMap = new Map(allMovies.map((movie) => [movie.movie_id, movie]));
+    const orderedMovies: Movie[] = [];
+
+    for (const movieId of cachedMovieOrder) {
+        const movie = movieMap.get(movieId);
+        if (movie) {
+            orderedMovies.push(movie);
+            movieMap.delete(movieId);
+        }
+    }
+
+    const newMovies = Array.from(movieMap.values());
+
+    if (newMovies.length > 0) {
+        cachedMovieOrder = [
+            ...cachedMovieOrder,
+            ...newMovies.map((movie) => movie.movie_id),
+        ];
+        orderedMovies.push(...newMovies);
+    }
+
+    return orderedMovies;
 }
 
 export default function RateMoviesScreen() {
@@ -49,37 +82,65 @@ export default function RateMoviesScreen() {
     const [ratingsCount, setRatingsCount] = useState(0);
     const [loading, setLoading] = useState(true);
 
+    const flatListRef = useRef<FlatList<Movie>>(null);
+    const currentScrollOffsetRef = useRef(0);
+
     const [fontsLoaded] = useFonts({
         JockeyOne_400Regular,
     });
 
     const canGoNext = ratingsCount >= 5;
 
-    const loadData = async () => {
+    const loadInitialData = async () => {
         try {
             setLoading(true);
 
             const [allMovies, count] = await Promise.all([
-                getUnratedMovies(),
+                getAllMovies(),
                 getUserRatingsCount(),
             ]);
 
-            setMovies(shuffleMovies(allMovies ?? []));
+            const orderedMovies = orderMoviesOnce(allMovies ?? []);
+
+            setMovies(orderedMovies);
             setRatingsCount(count ?? 0);
         } catch (error) {
-            console.error('Failed to load rate-movies screen data:', error);
+            console.error('Failed to load initial rate-movies data:', error);
         } finally {
             setLoading(false);
         }
     };
 
+    const refreshRatingsCount = async () => {
+        try {
+            const count = await getUserRatingsCount();
+            setRatingsCount(count ?? 0);
+        } catch (error) {
+            console.error('Failed to refresh ratings count:', error);
+        }
+    };
+
     useEffect(() => {
-        loadData();
+        loadInitialData();
     }, []);
 
     useFocusEffect(
         useCallback(() => {
-            loadData();
+            refreshRatingsCount();
+
+            const timer = setTimeout(() => {
+                if (flatListRef.current && currentScrollOffsetRef.current > 0) {
+                    flatListRef.current.scrollToOffset({
+                        offset: currentScrollOffsetRef.current,
+                        animated: false,
+                    });
+                }
+            }, 0);
+
+            return () => {
+                clearTimeout(timer);
+                cachedScrollOffset = currentScrollOffsetRef.current;
+            };
         }, [])
     );
 
@@ -93,6 +154,22 @@ export default function RateMoviesScreen() {
         );
     }, [movies, searchText]);
 
+    useEffect(() => {
+        if (searchText.trim().length === 0) {
+            const timer = setTimeout(() => {
+                if (flatListRef.current && cachedScrollOffset > 0) {
+                    flatListRef.current.scrollToOffset({
+                        offset: cachedScrollOffset,
+                        animated: false,
+                    });
+                    currentScrollOffsetRef.current = cachedScrollOffset;
+                }
+            }, 0);
+
+            return () => clearTimeout(timer);
+        }
+    }, [searchText]);
+
     const handlePressMovie = (movieId: number) => {
         router.push(`/movie/${movieId}`);
     };
@@ -100,6 +177,16 @@ export default function RateMoviesScreen() {
     const handleNext = () => {
         if (!canGoNext) return;
         router.replace('/(tabs)');
+    };
+
+    const updateScrollOffset = (
+        event: NativeSyntheticEvent<NativeScrollEvent>
+    ) => {
+        if (searchText.trim().length > 0) return;
+
+        const offsetY = event.nativeEvent.contentOffset.y;
+        currentScrollOffsetRef.current = offsetY;
+        cachedScrollOffset = offsetY;
     };
 
     const renderMovieCard = ({ item }: { item: Movie }) => {
@@ -162,6 +249,7 @@ export default function RateMoviesScreen() {
             </View>
 
             <FlatList
+                ref={flatListRef}
                 data={filteredMovies}
                 keyExtractor={(item) => String(item.movie_id)}
                 renderItem={renderMovieCard}
@@ -169,6 +257,10 @@ export default function RateMoviesScreen() {
                 columnWrapperStyle={styles.row}
                 contentContainerStyle={styles.listContent}
                 showsVerticalScrollIndicator={false}
+                onScroll={updateScrollOffset}
+                onScrollEndDrag={updateScrollOffset}
+                onMomentumScrollEnd={updateScrollOffset}
+                scrollEventThrottle={16}
             />
 
             <Pressable

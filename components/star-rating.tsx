@@ -3,7 +3,7 @@ import { useMemo } from 'react';
 
 const emptyStar = require('../assets/images/icons/emptyStar.png');
 const halfStar = require('../assets/images/icons/defaultHalf.png');
-const fullStar = require('../assets/images/icons/defaultFullStar.png');
+const fullStar = require('../assets/images/icons/defaultStar.png');
 
 type StarRatingProps = {
     rating: number;
