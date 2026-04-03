@@ -1,79 +1,90 @@
 from __future__ import annotations
 
 import math
+import os
 import pickle
 from pathlib import Path
 from typing import Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
+from dotenv import load_dotenv
 from fastapi import FastAPI
-from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
+load_dotenv()
 
 ROOT = Path(__file__).resolve().parent
-BUNDLE_PATH = ROOT / "movie_recommender_bundle.pkl"
+BUNDLE_PATH = ROOT / os.getenv("MODEL_BUNDLE_PATH", "movie_recommender_bundle.pkl")
 
+MIN_HISTORY_FOR_ROW = 3
+HIGH_RATING_THRESHOLD = 4.0
+LOW_RATING_THRESHOLD = 2.5
+MIN_APP_RATINGS = 5
 
-# =========================================================
-# LOAD BUNDLE
-# =========================================================
 with open(BUNDLE_PATH, "rb") as f:
     bundle = pickle.load(f)
 
 model = bundle["model"]
 movie_df = bundle["movie_df"]
 feature_cols = bundle["feature_cols"]
-cfg = bundle["config"]
 
+required_bundle_keys = {"model", "movie_df", "feature_cols"}
+missing = required_bundle_keys - set(bundle.keys())
+if missing:
+    raise ValueError(f"Bundle is missing required keys: {missing}")
 
-# =========================================================
-# APP
-# =========================================================
+if not isinstance(movie_df, pd.DataFrame):
+    raise TypeError("bundle['movie_df'] must be a pandas DataFrame")
+
+if not isinstance(feature_cols, list):
+    raise TypeError("bundle['feature_cols'] must be a list")
+
+emb_cols = [c for c in movie_df.columns if c.startswith("emb_")]
+if not emb_cols:
+    raise ValueError("No embedding columns found in movie_df")
+
+if "movieId" not in movie_df.columns:
+    raise ValueError("movie_df must include 'movieId' column")
+
+if "genre_list" not in movie_df.columns:
+    raise ValueError("movie_df must include 'genre_list' column")
+
 app = FastAPI()
+
+cors_origins = os.getenv("CORS_ALLOW_ORIGINS", "*")
+allow_origins = ["*"] if cors_origins == "*" else [x.strip() for x in cors_origins.split(",")]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-
-# =========================================================
-# REQUEST / RESPONSE SCHEMAS
-# =========================================================
 class RatingItem(BaseModel):
     movieId: int
     rating: float
 
-
 class PredictRequest(BaseModel):
     ratings: List[RatingItem]
 
-
-# =========================================================
-# HELPERS
-# =========================================================
 def cosine_similarity_vector_to_matrix(vec: np.ndarray, mat: np.ndarray) -> np.ndarray:
     vec_norm = np.linalg.norm(vec)
     mat_norm = np.linalg.norm(mat, axis=1)
     return (mat @ vec) / np.clip(mat_norm * max(vec_norm, 1e-12), 1e-12, None)
 
-
-def build_new_user_feature_rows_by_movieid(
+def build_new_user_feature_rows(
     movie_df: pd.DataFrame,
     selected_movies_with_ratings: List[Dict],
-    cfg,
 ) -> Tuple[pd.DataFrame, set]:
     emb_cols = [c for c in movie_df.columns if c.startswith("emb_")]
     emb_matrix = movie_df[emb_cols].to_numpy(dtype=float)
     movieid_to_index = {int(mid): idx for idx, mid in enumerate(movie_df["movieId"].tolist())}
 
     resolved = []
-
     for item in selected_movies_with_ratings:
         movie_id = int(item["movieId"])
         rating = float(item["rating"])
@@ -85,16 +96,16 @@ def build_new_user_feature_rows_by_movieid(
         emb = emb_matrix[movieid_to_index[movie_id]]
         resolved.append((movie_id, rating, emb))
 
-    if len(resolved) < cfg.min_history_for_row:
+    if len(resolved) < MIN_HISTORY_FOR_ROW:
         raise ValueError(
-            f"Need at least {cfg.min_history_for_row} resolved rated movies for new-user prediction."
+            f"Need at least {MIN_HISTORY_FOR_ROW} resolved rated movies for new-user prediction."
         )
 
     watched_movie_ids = {m for m, _, _ in resolved}
     hist_embs = np.array([emb for _, _, emb in resolved], dtype=float)
 
-    liked = [(m, r, e) for (m, r, e) in resolved if r >= cfg.high_rating_threshold]
-    disliked = [(m, r, e) for (m, r, e) in resolved if r <= cfg.low_rating_threshold]
+    liked = [(m, r, e) for (m, r, e) in resolved if r >= HIGH_RATING_THRESHOLD]
+    disliked = [(m, r, e) for (m, r, e) in resolved if r <= LOW_RATING_THRESHOLD]
 
     user_profile_all = hist_embs.mean(axis=0)
 
@@ -185,59 +196,48 @@ def build_new_user_feature_rows_by_movieid(
 
     return pd.DataFrame(rows), watched_movie_ids
 
-
-def predict_for_new_user_by_movieid(
+def predict_for_new_user_all(
     model,
     movie_df: pd.DataFrame,
     selected_movies_with_ratings: List[Dict],
     feature_cols: List[str],
-    cfg,
 ) -> pd.DataFrame:
-    candidate_df, _ = build_new_user_feature_rows_by_movieid(
-        movie_df=movie_df,
-        selected_movies_with_ratings=selected_movies_with_ratings,
-        cfg=cfg,
-    )
-
+    candidate_df, _ = build_new_user_feature_rows(movie_df, selected_movies_with_ratings)
     X = candidate_df[feature_cols]
+
     candidate_df = candidate_df.copy()
     candidate_df["predicted_rating"] = model.predict(X)
     candidate_df["predicted_rating"] = candidate_df["predicted_rating"].clip(0.5, 5.0)
+    candidate_df = candidate_df.sort_values("predicted_rating", ascending=False).reset_index(drop=True)
+    return candidate_df
 
-    return candidate_df.sort_values("predicted_rating", ascending=False).reset_index(drop=True)
-
-
-# =========================================================
-# ROUTES
-# =========================================================
 @app.get("/health")
 def health():
-    emb_cols = [c for c in movie_df.columns if c.startswith("emb_")]
     return {
         "ok": True,
-        "movies": len(movie_df),
+        "movies": int(len(movie_df)),
         "feature_cols": feature_cols,
         "embedding_dim": len(emb_cols),
+        "min_history_for_row": MIN_HISTORY_FOR_ROW,
+        "min_app_ratings": MIN_APP_RATINGS,
     }
-
 
 @app.post("/predict/all")
 def predict_all(request: PredictRequest):
     ratings = [item.model_dump() for item in request.ratings]
 
-    if len(ratings) < 5:
+    if len(ratings) < MIN_APP_RATINGS:
         return {
             "ok": False,
-            "message": "At least 5 ratings are required.",
+            "message": f"At least {MIN_APP_RATINGS} ratings are required.",
             "predictions": [],
         }
 
-    pred_df = predict_for_new_user_by_movieid(
+    pred_df = predict_for_new_user_all(
         model=model,
         movie_df=movie_df,
         selected_movies_with_ratings=ratings,
         feature_cols=feature_cols,
-        cfg=cfg,
     )
 
     predictions = [

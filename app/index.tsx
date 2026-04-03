@@ -9,7 +9,7 @@ export default function IndexScreen() {
             try {
                 const count = await getUserRatingsCount();
 
-                if (count <= 0) {
+                if (count < 5) {
                     router.replace('/rate-movies');
                 } else {
                     router.replace('/(tabs)');

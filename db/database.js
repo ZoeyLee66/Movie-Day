@@ -2,6 +2,7 @@ import * as SQLite from 'expo-sqlite';
 import moviesSeed from '../data/movies_seed.json';
 
 let db = null;
+const BACKEND_URL = 'https://zoey-lee.com/movie-api';
 
 /**
  * DB 열기 + 테이블 만들기 + seed 데이터 넣기
@@ -49,20 +50,36 @@ export async function initDatabase() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       movie_id INTEGER NOT NULL UNIQUE,
       user_rating REAL NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (movie_id) REFERENCES movies(movie_id)
     );
 
     CREATE TABLE IF NOT EXISTS user_movie_predictions (
-    movie_id INTEGER PRIMARY KEY,
-    predicted_rating REAL NOT NULL,
-    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (movie_id) REFERENCES movies(movie_id)
+        movie_id INTEGER PRIMARY KEY,
+        predicted_rating REAL NOT NULL,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (movie_id) REFERENCES movies(movie_id)
     );
   `);
 
+    await ensureUserRatingsCreatedAt();
     await seedMoviesIfEmpty();
 
     return db;
+}
+
+async function ensureUserRatingsCreatedAt() {
+    const columns = await db.getAllAsync(`PRAGMA table_info(user_ratings)`);
+    const columnNames = columns.map((column) => column.name);
+
+    if (!columnNames.includes('created_at')) {
+        await db.execAsync(`ALTER TABLE user_ratings ADD COLUMN created_at TEXT;`);
+        await db.execAsync(`
+            UPDATE user_ratings
+            SET created_at = CURRENT_TIMESTAMP
+            WHERE created_at IS NULL
+        `);
+    }
 }
 
 /**
@@ -263,8 +280,8 @@ export async function saveUserRating(movieId, userRating) {
     if (existing) {
         await db.runAsync(
             `UPDATE user_ratings
-       SET user_rating = ?, created_at = CURRENT_TIMESTAMP
-       WHERE movie_id = ?`,
+            SET user_rating = ?, created_at = CURRENT_TIMESTAMP
+            WHERE movie_id = ?`,
             [userRating, movieId]
         );
         console.log(`Updated rating for movie_id=${movieId}`);
@@ -272,7 +289,7 @@ export async function saveUserRating(movieId, userRating) {
     } else {
         await db.runAsync(
             `INSERT INTO user_ratings (movie_id, user_rating)
-       VALUES (?, ?)`,
+            VALUES (?, ?)`,
             [movieId, userRating]
         );
         console.log(`Inserted rating for movie_id=${movieId}`);
@@ -284,10 +301,10 @@ export async function getUserRating(movieId) {
     try {
         const result = await db.getFirstAsync(
             `
-      SELECT user_rating
-      FROM user_ratings
-      WHERE movie_id = ?
-      `,
+            SELECT user_rating
+            FROM user_ratings
+            WHERE movie_id = ?
+            `,
             [movieId]
         );
 

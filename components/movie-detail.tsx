@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { getUserRating, saveUserRating } from '../db/database';
+import { getUserRating, saveUserRatingAndRefreshPredictions } from '../db/database';
 
 const emptyStar = require('../assets/images/icons/emptyStar.png');
 const halfStar = require('../assets/images/icons/defaultHalf.png');
@@ -80,7 +80,7 @@ export default function MovieDetail({ movie }: MovieDetailProps) {
             setSelectedRating(nextRating);
             setSavedRating(nextRating);
 
-            await saveUserRating(movie.movie_id, nextRating);
+            await saveUserRatingAndRefreshPredictions(movie.movie_id, nextRating);
         } catch (error) {
             console.error('Failed to save rating:', error);
         }
