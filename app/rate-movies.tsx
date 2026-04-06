@@ -171,7 +171,14 @@ export default function RateMoviesScreen() {
     }, [searchText]);
 
     const handlePressMovie = (movieId: number) => {
-        router.push(`/movie/${movieId}`);
+        router.push({
+            pathname: '/movie/[id]',
+            params: {
+                id: String(movieId),
+                source: 'rate-movies',
+                provider: 'defaultAll',
+            },
+        });
     };
 
     const handleNext = () => {

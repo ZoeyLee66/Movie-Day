@@ -9,28 +9,49 @@ import {
   ActivityIndicator,
   StyleSheet,
   Modal,
-  PanResponder,
+  ScrollView,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { getHomeMovies } from '../../db/database';
+import {
+  useFonts,
+  JockeyOne_400Regular,
+} from '@expo-google-fonts/jockey-one';
+import { Ionicons } from '@expo/vector-icons';
+import { useRef } from 'react';
+import { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 
+let cachedHomeScrollOffset = 0;
 const defaultAll = require('../../assets/images/icons/defaultAll.png');
 const defaultGenre = require('../../assets/images/icons/defaultGenre.png');
 const defaultSort = require('../../assets/images/icons/defaultSort.png');
 const defaultStar = require('../../assets/images/icons/defaultStar.png');
+const defaultUser = require('../../assets/images/icons/defaultUser.png');
 
 const disneyGenre = require('../../assets/images/icons/disneyGenre.png');
 const disneySort = require('../../assets/images/icons/disneySort.png');
 const disneyStar = require('../../assets/images/icons/disneyStar.png');
+const disneyUser = require('../../assets/images/icons/disneyUser.png');
 
 const netflixGenre = require('../../assets/images/icons/netflixGenre.png');
 const netflixSort = require('../../assets/images/icons/netflixSort.png');
 const netflixStar = require('../../assets/images/icons/netflixStar.png');
+const netflixUser = require('../../assets/images/icons/netflixUser.png');
 
 const selectedDisneyLogo = require('../../assets/images/icons/selectedDisneyLogo.png');
 const selectedNetflixLogo = require('../../assets/images/icons/selectedNetflixLogo.png');
 const selectedDefaultAll = require('../../assets/images/icons/selectedDefaultAll.png');
+
+const flatListRef = useRef<FlatList<Movie>>(null);
+const currentScrollOffsetRef = useRef(0);
+
+const updateScrollOffset = (
+  event: NativeSyntheticEvent<NativeScrollEvent>
+) => {
+  const offsetY = event.nativeEvent.contentOffset.y;
+  currentScrollOffsetRef.current = offsetY;
+  cachedHomeScrollOffset = offsetY;
+};
 
 type Provider = 'defaultAll' | 'Disney+' | 'Netflix';
 type SortOption = 'predicted' | 'average' | 'random';
@@ -55,7 +76,7 @@ type Movie = {
 };
 
 const PROVIDER_COLOR = {
-  defaultAll: '#FFCB2B',
+  defaultAll: '#FFFFFF',
   'Disney+': '#006E99',
   Netflix: '#BA0C0C',
 };
@@ -95,6 +116,12 @@ function getSelectedProviderLogo(provider: Provider) {
   if (provider === 'Disney+') return selectedDisneyLogo;
   if (provider === 'Netflix') return selectedNetflixLogo;
   return selectedDefaultAll;
+}
+
+function getUserIcon(provider: Provider) {
+  if (provider === 'Disney+') return disneyUser;
+  if (provider === 'Netflix') return netflixUser;
+  return defaultUser;
 }
 
 function splitGenres(genres: string) {
@@ -143,30 +170,14 @@ function sortMovies(movies: Movie[], sortOption: SortOption) {
   return copied;
 }
 
-function DragHandle({ onClose }: { onClose: () => void }) {
-  const panResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onMoveShouldSetPanResponder: (_, gestureState) => {
-          return Math.abs(gestureState.dy) > 8;
-        },
-        onPanResponderRelease: (_, gestureState) => {
-          if (gestureState.dy > 60) {
-            onClose();
-          }
-        },
-      }),
-    [onClose]
-  );
-
-  return (
-    <View {...panResponder.panHandlers} style={styles.dragArea}>
-      <View style={styles.dragHandle} />
-    </View>
-  );
-}
-
 export default function HomeScreen() {
+  const [fontsLoaded] = useFonts({
+    JockeyOne_400Regular,
+  });
+
+  const params = useLocalSearchParams();
+  const providerParam = params.provider;
+
   const [movies, setMovies] = useState<Movie[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -177,8 +188,30 @@ export default function HomeScreen() {
 
   const [genreModalVisible, setGenreModalVisible] = useState(false);
   const [sortModalVisible, setSortModalVisible] = useState(false);
+  const [providerMenuVisible, setProviderMenuVisible] = useState(false);
+
+  useEffect(() => {
+    if (
+      providerParam === 'defaultAll' ||
+      providerParam === 'Disney+' ||
+      providerParam === 'Netflix'
+    ) {
+      setSelectedProvider(providerParam);
+      setProviderMenuVisible(false);
+    }
+  }, [providerParam]);
 
   const providerColor = getProviderColor(selectedProvider);
+
+  const providerOptions: {
+    key: Provider;
+    label: string;
+    icon: any;
+  }[] = [
+      { key: 'Netflix', label: 'Netflix', icon: selectedNetflixLogo },
+      { key: 'Disney+', label: 'Disney+', icon: selectedDisneyLogo },
+      { key: 'defaultAll', label: 'ALL', icon: selectedDefaultAll },
+    ];
 
   const loadMovies = useCallback(async () => {
     try {
@@ -198,7 +231,23 @@ export default function HomeScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      setProviderMenuVisible(false);
       loadMovies();
+
+      const timer = setTimeout(() => {
+        if (flatListRef.current && cachedHomeScrollOffset > 0) {
+          flatListRef.current.scrollToOffset({
+            offset: cachedHomeScrollOffset,
+            animated: false,
+          });
+          currentScrollOffsetRef.current = cachedHomeScrollOffset;
+        }
+      }, 0);
+
+      return () => {
+        clearTimeout(timer);
+        cachedHomeScrollOffset = currentScrollOffsetRef.current;
+      };
     }, [loadMovies])
   );
 
@@ -246,7 +295,15 @@ export default function HomeScreen() {
   }, [movies, searchText, selectedProvider, selectedGenre, selectedSort]);
 
   const handlePressMovie = (movieId: number) => {
-    router.push(`/movie/${movieId}`);
+    setProviderMenuVisible(false);
+    router.push({
+      pathname: '/movie/[id]',
+      params: {
+        id: String(movieId),
+        source: 'home',
+        provider: selectedProvider,
+      },
+    });
   };
 
   const renderRatingRow = (movie: Movie) => {
@@ -254,15 +311,19 @@ export default function HomeScreen() {
     const predictedRating = normalizeNumber(movie.predicted_rating);
     const avgRating = normalizeNumber(movie.avg_rating);
 
+    const ratedColor = selectedProvider === 'defaultAll' ? '#FFD54A' : providerColor;
     const isRated = userRating !== null;
 
     if (isRated) {
       return (
         <View style={styles.ratingRow}>
-          <Text style={[styles.ratingPrefix, { color: providerColor }]}>rated</Text>
+          <Text style={[styles.ratingPrefix, { color: ratedColor }]}>rated</Text>
           <Image source={getStarIcon(selectedProvider)} style={styles.ratingStar} />
-          <Text style={[styles.ratingValue, { color: providerColor }]}>
+          <Text style={[styles.ratingValue, { color: ratedColor }]}>
             {userRating.toFixed(1)}
+          </Text>
+          <Text style={[styles.avgText, { color: ratedColor }]}>
+            (avg. {avgRating !== null ? avgRating.toFixed(1) : '-'})
           </Text>
         </View>
       );
@@ -296,12 +357,7 @@ export default function HomeScreen() {
     </Pressable>
   );
 
-  const sortLabel =
-    selectedSort === 'predicted'
-      ? 'Predicted rating: High to low'
-      : selectedSort === 'average'
-        ? 'Average rating: High to low'
-        : 'Random';
+  if (!fontsLoaded) return null;
 
   if (loading) {
     return (
@@ -311,9 +367,27 @@ export default function HomeScreen() {
     );
   }
 
+  const otherProviderOptions = providerOptions.filter(
+    (option) => option.key !== selectedProvider
+  );
+
   return (
     <View style={styles.container}>
-      <Text style={[styles.logo, { color: providerColor }]}>MOVIE DAY</Text>
+      {providerMenuVisible && (
+        <Pressable
+          style={styles.providerMenuOverlay}
+          onPress={() => setProviderMenuVisible(false)}
+        />
+      )}
+
+      <Text
+        style={[
+          styles.logo,
+          { color: providerColor, fontFamily: 'JockeyOne_400Regular' },
+        ]}
+      >
+        MOVIE DAY
+      </Text>
 
       <View style={styles.searchWrapper}>
         <Ionicons
@@ -322,13 +396,19 @@ export default function HomeScreen() {
           color="#8E8E93"
           style={styles.searchIcon}
         />
+
         <TextInput
           value={searchText}
-          onChangeText={setSearchText}
+          onChangeText={(text) => {
+            setProviderMenuVisible(false);
+            setSearchText(text);
+          }}
           placeholder="Search for movie title"
           placeholderTextColor="#9A9A9A"
           style={styles.searchInput}
+          onFocus={() => setProviderMenuVisible(false)}
         />
+
         {searchText.trim().length > 0 && (
           <Pressable onPress={() => setSearchText('')}>
             <Ionicons name="close-circle" size={16} color="#8E8E93" />
@@ -339,7 +419,10 @@ export default function HomeScreen() {
       <View style={styles.filterRow}>
         <Pressable
           style={styles.filterItem}
-          onPress={() => setGenreModalVisible(true)}
+          onPress={() => {
+            setProviderMenuVisible(false);
+            setGenreModalVisible(true);
+          }}
         >
           <Image source={getGenreIcon(selectedProvider)} style={styles.filterIcon} />
           <Text style={styles.filterText}>select genre</Text>
@@ -347,7 +430,10 @@ export default function HomeScreen() {
 
         <Pressable
           style={styles.filterItem}
-          onPress={() => setSortModalVisible(true)}
+          onPress={() => {
+            setProviderMenuVisible(false);
+            setSortModalVisible(true);
+          }}
         >
           <Image source={getSortIcon(selectedProvider)} style={styles.filterIcon} />
           <Text style={styles.filterText}>sorting option</Text>
@@ -355,6 +441,7 @@ export default function HomeScreen() {
       </View>
 
       <FlatList
+        ref={flatListRef}
         data={filteredMovies}
         keyExtractor={(item) => String(item.movie_id)}
         renderItem={renderMovieCard}
@@ -362,31 +449,82 @@ export default function HomeScreen() {
         columnWrapperStyle={styles.row}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
+        onScroll={updateScrollOffset}
+        onScrollEndDrag={updateScrollOffset}
+        onMomentumScrollEnd={updateScrollOffset}
+        scrollEventThrottle={16}
       />
 
-      <View style={styles.bottomFloatingArea}>
+      <View pointerEvents="box-none" style={styles.bottomFloatingArea}>
+        <View style={styles.leftControlSlot}>
+          <Pressable
+            style={[
+              styles.providerPill,
+              providerMenuVisible && styles.providerPillExpanded,
+            ]}
+            onPress={() => setProviderMenuVisible((prev) => !prev)}
+          >
+            {providerMenuVisible && (
+              <View style={styles.providerOptionsContainer}>
+                {otherProviderOptions.map((option, index) => {
+                  const isFirstOption = index === 0;
+                  const isLastOption = index === otherProviderOptions.length - 1;
+
+                  return (
+                    <Pressable
+                      key={option.key}
+                      style={[
+                        styles.providerOptionSlot,
+                        isFirstOption && styles.providerOptionSlotFirst,
+                        isLastOption && styles.providerOptionSlotLast,
+                      ]}
+                      onPress={() => {
+                        setSelectedProvider(option.key);
+                        setProviderMenuVisible(false);
+                      }}
+                    >
+                      <Image
+                        source={option.icon}
+                        style={styles.providerOptionIcon}
+                        resizeMode="contain"
+                      />
+                      <Text style={styles.providerOptionText}>{option.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
+
+            <View style={styles.providerOptionSlotSelected}>
+              <Image
+                source={getSelectedProviderLogo(selectedProvider)}
+                style={styles.providerCircleLogo}
+                resizeMode="contain"
+              />
+            </View>
+          </Pressable>
+        </View>
+
         <Pressable
-          style={styles.providerCircle}
-          onPress={() => {
-            if (selectedProvider === 'defaultAll') {
-              setSelectedProvider('Disney+');
-            } else if (selectedProvider === 'Disney+') {
-              setSelectedProvider('Netflix');
-            } else {
-              setSelectedProvider('defaultAll');
-            }
-          }}
+          onPress={() =>
+            router.push({
+              pathname: '/user-page',
+              params: {
+                provider: selectedProvider,
+              },
+            })
+          }
+          style={({ pressed }) => [
+            styles.profileCircle,
+            pressed && styles.profileCirclePressed,
+          ]}
         >
           <Image
-            source={getSelectedProviderLogo(selectedProvider)}
-            style={styles.providerCircleLogo}
+            source={getUserIcon(selectedProvider)}
+            style={styles.profileIcon}
             resizeMode="contain"
           />
         </Pressable>
-
-        <View style={styles.profileCircle}>
-          <Ionicons name="person-outline" size={28} color={providerColor} />
-        </View>
       </View>
 
       <Modal
@@ -401,38 +539,49 @@ export default function HomeScreen() {
             onPress={() => setGenreModalVisible(false)}
           />
           <View style={styles.bottomSheet}>
-            <DragHandle onClose={() => setGenreModalVisible(false)} />
+            <Pressable
+              style={styles.dragArea}
+              onPress={() => setGenreModalVisible(false)}
+            >
+              <View style={styles.dragHandle} />
+            </Pressable>
 
-            {genreOptions.map((genre, index) => {
-              const isSelected = genre === selectedGenre;
-              const isLast = index === genreOptions.length - 1;
+            <ScrollView
+              style={styles.sheetScroll}
+              contentContainerStyle={styles.sheetScrollContent}
+              showsVerticalScrollIndicator={false}
+            >
+              {genreOptions.map((genre, index) => {
+                const isSelected = genre === selectedGenre;
+                const isLast = index === genreOptions.length - 1;
 
-              return (
-                <Pressable
-                  key={genre}
-                  style={[
-                    styles.sheetOption,
-                    !isLast && styles.sheetOptionBorder,
-                  ]}
-                  onPress={() => {
-                    setSelectedGenre(genre);
-                    setGenreModalVisible(false);
-                  }}
-                >
-                  <Text
+                return (
+                  <Pressable
+                    key={genre}
                     style={[
-                      styles.sheetOptionText,
-                      isSelected && {
-                        color: providerColor,
-                        fontWeight: '700',
-                      },
+                      styles.sheetOption,
+                      !isLast && styles.sheetOptionBorder,
                     ]}
+                    onPress={() => {
+                      setSelectedGenre(genre);
+                      setGenreModalVisible(false);
+                    }}
                   >
-                    {genre}
-                  </Text>
-                </Pressable>
-              );
-            })}
+                    <Text
+                      style={[
+                        styles.sheetOptionText,
+                        isSelected && {
+                          color: providerColor,
+                          fontWeight: '700',
+                        },
+                      ]}
+                    >
+                      {genre}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -449,51 +598,62 @@ export default function HomeScreen() {
             onPress={() => setSortModalVisible(false)}
           />
           <View style={styles.bottomSheet}>
-            <DragHandle onClose={() => setSortModalVisible(false)} />
+            <Pressable
+              style={styles.dragArea}
+              onPress={() => setSortModalVisible(false)}
+            >
+              <View style={styles.dragHandle} />
+            </Pressable>
 
-            {[
-              {
-                label: 'Predicted rating: High to low',
-                value: 'predicted' as SortOption,
-              },
-              {
-                label: 'Average rating: High to low',
-                value: 'average' as SortOption,
-              },
-              {
-                label: 'Random',
-                value: 'random' as SortOption,
-              },
-            ].map((option, index, array) => {
-              const isSelected = option.value === selectedSort;
-              const isLast = index === array.length - 1;
+            <ScrollView
+              style={styles.sheetScroll}
+              contentContainerStyle={styles.sheetScrollContent}
+              showsVerticalScrollIndicator={false}
+            >
+              {[
+                {
+                  label: 'Predicted rating: High to low',
+                  value: 'predicted' as SortOption,
+                },
+                {
+                  label: 'Average rating: High to low',
+                  value: 'average' as SortOption,
+                },
+                {
+                  label: 'Random',
+                  value: 'random' as SortOption,
+                },
+              ].map((option, index, array) => {
+                const isSelected = option.value === selectedSort;
+                const isLast = index === array.length - 1;
 
-              return (
-                <Pressable
-                  key={option.value}
-                  style={[
-                    styles.sheetOption,
-                    !isLast && styles.sheetOptionBorder,
-                  ]}
-                  onPress={() => {
-                    setSelectedSort(option.value);
-                    setSortModalVisible(false);
-                  }}
-                >
-                  <Text
+                return (
+                  <Pressable
+                    key={option.value}
                     style={[
-                      styles.sheetOptionText,
-                      isSelected && {
-                        color: providerColor,
-                        fontWeight: '700',
-                      },
+                      styles.sheetOption,
+                      !isLast && styles.sheetOptionBorder,
                     ]}
+                    onPress={() => {
+                      setSelectedSort(option.value);
+                      setSortModalVisible(false);
+                    }}
                   >
-                    {option.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
+                    <Text
+                      style={[
+                        styles.sheetOptionText,
+                        isSelected && {
+                          color: providerColor,
+                          fontWeight: '700',
+                        },
+                      ]}
+                    >
+                      {option.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -519,15 +679,16 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     textAlign: 'center',
     marginBottom: 18,
+    marginTop: 55,
   },
   searchWrapper: {
-    height: 36,
-    backgroundColor: '#EAEAEA',
+    height: 40,
+    backgroundColor: '#F2F2F2',
     borderRadius: 999,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 14,
-    marginBottom: 14,
+    marginBottom: 22,
   },
   searchIcon: {
     marginRight: 6,
@@ -559,7 +720,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
   listContent: {
-    paddingBottom: 120,
+    paddingBottom: 140,
   },
   row: {
     justifyContent: 'space-between',
@@ -607,38 +768,108 @@ const styles = StyleSheet.create({
     color: '#A5A5A5',
     fontSize: 7,
   },
+  providerMenuOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1,
+  },
   bottomFloatingArea: {
     position: 'absolute',
-    left: 18,
-    right: 18,
-    bottom: 18,
+    left: 25,
+    right: 25,
+    bottom: 32,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-end',
+    zIndex: 2,
   },
-  providerCircle: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-    backgroundColor: '#050505',
-    borderWidth: 1,
-    borderColor: '#1E1E1E',
-    justifyContent: 'center',
+  leftControlSlot: {
+    width: 64,
+    height: 220,
+    alignItems: 'flex-start',
+    justifyContent: 'flex-end',
+  },
+  providerPill: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#000000',
+    borderWidth: 2,
+    borderColor: '#1F1F1F',
+    overflow: 'hidden',
     alignItems: 'center',
+    justifyContent: 'center',
+  },
+  providerPillExpanded: {
+    position: 'absolute',
+    bottom: 0,
+    width: 64,
+    height: 220,
+    borderRadius: 32,
+    backgroundColor: '#1F1F1F',
+    borderWidth: 2,
+    borderColor: '#1F1F1F',
+    overflow: 'hidden',
+    alignItems: 'center',
+  },
+  providerOptionsContainer: {
+    position: 'absolute',
+    top: 10,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+  },
+  providerOptionSlot: {
+    width: 64,
+    height: 58,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  providerOptionSlotFirst: {
+    marginBottom: 16,
+  },
+  providerOptionSlotLast: {
+    marginBottom: 2,
+  },
+  providerOptionSlotSelected: {
+    position: 'absolute',
+    bottom: 0,
+    width: 64,
+    height: 64,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  providerOptionIcon: {
+    width: 38,
+    height: 38,
+    marginBottom: 4,
+  },
+  providerOptionText: {
+    color: '#FFFFFF',
+    fontSize: 8,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   providerCircleLogo: {
     width: 38,
     height: 38,
   },
   profileCircle: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     backgroundColor: '#050505',
-    borderWidth: 1,
-    borderColor: '#1E1E1E',
+    borderWidth: 2,
+    borderColor: '#1F1F1F',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  profileCirclePressed: {
+    backgroundColor: '#1F1F1F',
+  },
+  profileIcon: {
+    width: 38,
+    height: 38,
   },
   modalOverlay: {
     flex: 1,
@@ -652,8 +883,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#1F1F21',
     borderTopLeftRadius: 34,
     borderTopRightRadius: 34,
-    paddingBottom: 24,
     paddingHorizontal: 24,
+    paddingBottom: 24,
+    maxHeight: '68%',
+  },
+  sheetScroll: {
+    flexGrow: 0,
+  },
+  sheetScrollContent: {
+    paddingBottom: 8,
   },
   dragArea: {
     alignItems: 'center',

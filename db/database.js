@@ -4,10 +4,6 @@ import moviesSeed from '../data/movies_seed.json';
 let db = null;
 const BACKEND_URL = 'https://zoey-lee.com/movie-api';
 
-/**
- * DB 열기 + 테이블 만들기 + seed 데이터 넣기
- * 앱 시작할 때 가장 먼저 한 번 실행하면 됨
- */
 export async function initDatabase() {
     if (db) return db;
 
@@ -25,7 +21,6 @@ export async function initDatabase() {
     //     );
     // `);
 
-    // SQLite 설정
     await db.execAsync(`
     PRAGMA journal_mode = WAL;
 
@@ -60,6 +55,12 @@ export async function initDatabase() {
         updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (movie_id) REFERENCES movies(movie_id)
     );
+
+    CREATE TABLE IF NOT EXISTS want_to_watch (
+    movie_id INTEGER PRIMARY KEY,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (movie_id) REFERENCES movies(movie_id)
+    );
   `);
 
     await ensureUserRatingsCreatedAt();
@@ -82,9 +83,6 @@ async function ensureUserRatingsCreatedAt() {
     }
 }
 
-/**
- * movies 테이블이 비어 있으면 JSON seed 데이터를 한 번만 넣음
- */
 async function seedMoviesIfEmpty() {
     const result = await db.getFirstAsync(`SELECT COUNT(*) as count FROM movies`);
     const count = result?.count ?? 0;
@@ -144,6 +142,82 @@ export async function resetUserRatings() {
         console.error('Failed to reset user_ratings:', error);
         throw error;
     }
+}
+
+export async function isWantToWatch(movieId) {
+    const result = await db.getFirstAsync(
+        `SELECT movie_id FROM want_to_watch WHERE movie_id = ?`,
+        [movieId]
+    );
+    return !!result;
+}
+
+export async function addWantToWatch(movieId) {
+    await db.runAsync(
+        `
+        INSERT OR IGNORE INTO want_to_watch (movie_id, created_at)
+        VALUES (?, CURRENT_TIMESTAMP)
+        `,
+        [movieId]
+    );
+}
+
+export async function removeWantToWatch(movieId) {
+    await db.runAsync(
+        `DELETE FROM want_to_watch WHERE movie_id = ?`,
+        [movieId]
+    );
+}
+
+export async function toggleWantToWatch(movieId) {
+    const exists = await isWantToWatch(movieId);
+
+    if (exists) {
+        await removeWantToWatch(movieId);
+        return false;
+    } else {
+        await addWantToWatch(movieId);
+        return true;
+    }
+}
+
+export async function getWantToWatchMovies() {
+    return await db.getAllAsync(`
+        SELECT
+            m.movie_id,
+            m.tmdb_id,
+            m.title,
+            m.release_year,
+            m.genres,
+            m.overview,
+            m.keywords,
+            m.cast,
+            m.director,
+            m.avg_rating,
+            m.rating_count,
+            m.poster_url,
+            m.ca_netflix,
+            m.ca_disney_plus,
+            ur.user_rating,
+            ump.predicted_rating,
+            1 as is_want_to_watch
+        FROM want_to_watch w
+        JOIN movies m
+            ON w.movie_id = m.movie_id
+        LEFT JOIN user_ratings ur
+            ON m.movie_id = ur.movie_id
+        LEFT JOIN user_movie_predictions ump
+            ON m.movie_id = ump.movie_id
+        ORDER BY w.created_at DESC
+    `);
+}
+
+export async function isInWantToWatch(movieId) {
+    const result = await db.getFirstAsync(
+        `SELECT movie_id FROM want_to_watch WHERE movie_id = ?`,
+        [movieId]
+    );
+    return !!result;
 }
 
 export async function getAllMovies() {
@@ -212,10 +286,50 @@ export async function rebuildPredictionsFromBackend() {
 export async function saveUserRatingAndRefreshPredictions(movieId, userRating) {
     await saveUserRating(movieId, userRating);
 
+    // rated 되면 want_to_watch에서는 제거
+    await removeWantToWatch(movieId);
+
     const count = await getUserRatingsCount();
     if (count >= 5) {
         await rebuildPredictionsFromBackend();
     }
+}
+
+export async function getMovieDetailById(movieId) {
+    return await db.getFirstAsync(
+        `
+        SELECT
+            m.movie_id,
+            m.tmdb_id,
+            m.title,
+            m.release_year,
+            m.genres,
+            m.overview,
+            m.keywords,
+            m.cast,
+            m.director,
+            m.avg_rating,
+            m.rating_count,
+            m.poster_url,
+            m.ca_netflix,
+            m.ca_disney_plus,
+            ur.user_rating,
+            ump.predicted_rating,
+            CASE
+                WHEN w.movie_id IS NOT NULL THEN 1
+                ELSE 0
+            END as is_want_to_watch
+        FROM movies m
+        LEFT JOIN user_ratings ur
+            ON m.movie_id = ur.movie_id
+        LEFT JOIN user_movie_predictions ump
+            ON m.movie_id = ump.movie_id
+        LEFT JOIN want_to_watch w
+            ON m.movie_id = w.movie_id
+        WHERE m.movie_id = ?
+        `,
+        [movieId]
+    );
 }
 
 export async function getHomeMovies() {
@@ -236,19 +350,21 @@ export async function getHomeMovies() {
             m.ca_netflix,
             m.ca_disney_plus,
             ur.user_rating,
-            ump.predicted_rating
+            ump.predicted_rating,
+            CASE
+                WHEN w.movie_id IS NOT NULL THEN 1
+                ELSE 0
+            END as is_want_to_watch
         FROM movies m
         LEFT JOIN user_ratings ur
             ON m.movie_id = ur.movie_id
         LEFT JOIN user_movie_predictions ump
             ON m.movie_id = ump.movie_id
+        LEFT JOIN want_to_watch w
+            ON m.movie_id = w.movie_id
     `);
 }
 
-/**
- * 첫 사용자 여부 확인
- * user_ratings에 아무 데이터도 없으면 true
- */
 export async function isFirstTimeUser() {
     const result = await db.getFirstAsync(
         `SELECT COUNT(*) as count FROM user_ratings`
@@ -257,20 +373,30 @@ export async function isFirstTimeUser() {
     return (result?.count ?? 0) === 0;
 }
 
-/**
- * 특정 영화 1개 가져오기
- */
 export async function getMovieById(movieId) {
     return await db.getFirstAsync(
-        `SELECT * FROM movies WHERE movie_id = ?`,
+        `
+        SELECT
+            m.*,
+            ur.user_rating,
+            ump.predicted_rating,
+            CASE
+                WHEN wtw.movie_id IS NOT NULL THEN 1
+                ELSE 0
+            END AS is_saved
+        FROM movies m
+        LEFT JOIN user_ratings ur
+            ON m.movie_id = ur.movie_id
+        LEFT JOIN user_movie_predictions ump
+            ON m.movie_id = ump.movie_id
+        LEFT JOIN want_to_watch wtw
+            ON m.movie_id = wtw.movie_id
+        WHERE m.movie_id = ?
+        `,
         [movieId]
     );
 }
 
-/**
- * 유저 평점 저장
- * 이미 평가한 영화면 update, 아니면 insert
- */
 export async function saveUserRating(movieId, userRating) {
     const existing = await db.getFirstAsync(
         `SELECT id FROM user_ratings WHERE movie_id = ?`,
@@ -315,9 +441,6 @@ export async function getUserRating(movieId) {
     }
 }
 
-/**
- * 유저가 평가한 영화들 가져오기
- */
 export async function getUserRatings() {
     return await db.getAllAsync(`
     SELECT
@@ -334,10 +457,6 @@ export async function getUserRatings() {
   `);
 }
 
-/**
- * 유저가 아직 평가하지 않은 영화들 가져오기
- * 나중에 예측 계산할 때 유용
- */
 export async function getUnratedMovies() {
     return await db.getAllAsync(
         `
@@ -351,10 +470,6 @@ export async function getUnratedMovies() {
     );
 }
 
-/**
- * user_ratings 개수 가져오기
- * 최소 5개 평가했는지 같은 조건 체크할 때 사용
- */
 export async function getUserRatingsCount() {
     const result = await db.getFirstAsync(
         `SELECT COUNT(DISTINCT movie_id) as count FROM user_ratings`
@@ -363,9 +478,6 @@ export async function getUserRatingsCount() {
     return result?.count ?? 0;
 }
 
-/**
- * 디버깅용: movies 테이블 row 수 확인
- */
 export async function getMoviesCount() {
     const result = await db.getFirstAsync(
         `SELECT COUNT(*) as count FROM movies`
@@ -374,9 +486,6 @@ export async function getMoviesCount() {
     return result?.count ?? 0;
 }
 
-/**
- * 디버깅용: user_ratings 테이블 row 수 확인
- */
 export async function getUserRatingsTableCount() {
     const result = await db.getFirstAsync(
         `SELECT COUNT(*) as count FROM user_ratings`

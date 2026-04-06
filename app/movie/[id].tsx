@@ -1,39 +1,43 @@
 import { useEffect, useState } from 'react';
-import { View, Text, ActivityIndicator } from 'react-native';
+import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import MovieDetail from '../../components/movie-detail';
 import { getMovieById } from '../../db/database';
 
-type Movie = {
+type DetailMovie = {
     movie_id: number;
     tmdb_id: number;
     title: string;
     release_year: number;
     genres: string;
     overview: string;
-    keywords: string;
-    cast: string;
+    keywords?: string;
+    cast?: string;
     director: string;
-    avg_rating: number;
-    predicted_rating?: number;
-    rating_count: number;
+    avg_rating?: number | null;
+    predicted_rating?: number | null;
+    rating_count?: number | null;
     poster_url: string;
-    ca_netflix: number;
-    ca_disney_plus: number;
+    user_rating?: number | null;
+    is_saved?: number;
 };
 
 export default function MovieDetailPage() {
-    const { id } = useLocalSearchParams<{ id: string }>();
-    const [movie, setMovie] = useState<Movie | null>(null);
+    const { id, source, provider } = useLocalSearchParams<{
+        id: string;
+        source?: string;
+        provider?: string;
+    }>();
+
+    const [movie, setMovie] = useState<DetailMovie | null>(null);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         const loadMovie = async () => {
             try {
-                if (!id) return;
-
-                const movieData = await getMovieById(Number(id));
-                setMovie(movieData ?? null);
+                setLoading(true);
+                const data = await getMovieById(Number(id));
+                setMovie(data ?? null);
             } catch (error) {
                 console.error('Failed to load movie detail:', error);
             } finally {
@@ -41,26 +45,41 @@ export default function MovieDetailPage() {
             }
         };
 
-        loadMovie();
+        if (id) {
+            loadMovie();
+        }
     }, [id]);
 
-    if (loading) {
+    if (loading || !movie) {
         return (
-            <View className="flex-1 bg-black justify-center items-center">
+            <View style={styles.loadingContainer}>
                 <ActivityIndicator size="large" color="#FFFFFF" />
             </View>
         );
     }
 
-    if (!movie) {
-        return (
-            <View className="flex-1 bg-black justify-center items-center px-6">
-                <Text className="text-white text-base text-center">
-                    Movie not found.
-                </Text>
-            </View>
-        );
-    }
-
-    return <MovieDetail movie={movie} />;
+    return (
+        <MovieDetail
+            movie={movie}
+            source={
+                source === 'rate-movies' || source === 'user-page' || source === 'home'
+                    ? source
+                    : 'home'
+            }
+            provider={
+                provider === 'Netflix' || provider === 'Disney+' || provider === 'defaultAll'
+                    ? provider
+                    : 'defaultAll'
+            }
+        />
+    );
 }
+
+const styles = StyleSheet.create({
+    loadingContainer: {
+        flex: 1,
+        backgroundColor: '#000000',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+});
