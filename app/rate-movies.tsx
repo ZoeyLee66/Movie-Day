@@ -233,13 +233,6 @@ export default function RateMoviesScreen() {
             </Text>
 
             <View style={styles.searchWrapper}>
-                <Ionicons
-                    name="search"
-                    size={14}
-                    color="#8E8E93"
-                    style={styles.searchIcon}
-                />
-
                 <TextInput
                     value={searchText}
                     onChangeText={setSearchText}
@@ -308,28 +301,29 @@ const styles = StyleSheet.create({
     },
     logo: {
         color: '#FFFFFF',
-        fontSize: 34,
+        fontSize: 55,
         textAlign: 'center',
-        lineHeight: 38,
+        lineHeight: 55,
+        marginBottom: 10,
+        marginTop: 55,
     },
     subtitle: {
         color: '#FFFFFF',
-        fontSize: 11,
+        fontSize: 13,
         textAlign: 'center',
         marginTop: 2,
-        marginBottom: 20,
+        marginBottom: 25,
     },
     searchWrapper: {
-        height: 40,
+        height: 45,
+        width: '88%',
+        alignSelf: 'center',
         backgroundColor: '#F2F2F2',
         borderRadius: 999,
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: 14,
+        paddingHorizontal: 20,
         marginBottom: 22,
-    },
-    searchIcon: {
-        marginRight: 6,
     },
     searchInput: {
         flex: 1,
@@ -363,20 +357,20 @@ const styles = StyleSheet.create({
         position: 'absolute',
         bottom: 30,
         alignSelf: 'center',
-        width: 170,
+        width: 250,
         height: 52,
         borderRadius: 999,
         justifyContent: 'center',
         alignItems: 'center',
     },
     nextButtonDisabled: {
-        backgroundColor: '#2B2B2B',
+        backgroundColor: '#1F1F1F',
     },
     nextButtonEnabled: {
         backgroundColor: '#FFFFFF',
     },
     nextButtonText: {
-        fontSize: 18,
+        fontSize: 20,
         fontWeight: '700',
     },
     nextButtonTextDisabled: {

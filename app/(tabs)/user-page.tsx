@@ -41,11 +41,8 @@ const disneyLogo = require('../../assets/images/icons/disneyLogo.png');
 const netflixLogo = require('../../assets/images/icons/netflixLogo.png');
 const defaultAllLogo = require('../../assets/images/icons/defaultAll.png');
 
-const flatListRef = useRef<FlatList<Movie>>(null);
-const currentScrollOffsetRef = useRef(0);
-
 type Provider = 'defaultAll' | 'Disney+' | 'Netflix';
-type SortOption = 'predicted' | 'average' | 'random';
+type SortOption = 'user' | 'average' | 'random' | 'predicted';
 type ViewMode = 'want' | 'rated';
 
 type Movie = {
@@ -153,6 +150,15 @@ function sortMovies(movies: Movie[], sortOption: SortOption) {
         return copied;
     }
 
+    if (sortOption === 'user') {
+        copied.sort((a, b) => {
+            const aValue = normalizeNumber(a.user_rating) ?? -1;
+            const bValue = normalizeNumber(b.user_rating) ?? -1;
+            return bValue - aValue;
+        });
+        return copied;
+    }
+
     if (sortOption === 'average') {
         copied.sort((a, b) => {
             const aValue = normalizeNumber(a.avg_rating) ?? -1;
@@ -171,19 +177,10 @@ export default function UserPageScreen() {
         JockeyOne_400Regular,
     });
 
-    const updateScrollOffset = (
-        event: NativeSyntheticEvent<NativeScrollEvent>
-    ) => {
-        const offsetY = event.nativeEvent.contentOffset.y;
-        currentScrollOffsetRef.current = offsetY;
+    const flatListRef = useRef<FlatList<Movie>>(null);
+    const currentScrollOffsetRef = useRef(0);
+    const didMountProviderRef = useRef(false);
 
-        if (viewMode === 'want') {
-            cachedUserWantScrollOffset = offsetY;
-        } else {
-            cachedUserRatedScrollOffset = offsetY;
-        }
-    };
-    
     const [providerMenuVisible, setProviderMenuVisible] = useState(false);
 
     const params = useLocalSearchParams();
@@ -222,6 +219,19 @@ export default function UserPageScreen() {
     const [genreModalVisible, setGenreModalVisible] = useState(false);
     const [sortModalVisible, setSortModalVisible] = useState(false);
 
+    const updateScrollOffset = (
+        event: NativeSyntheticEvent<NativeScrollEvent>
+    ) => {
+        const offsetY = event.nativeEvent.contentOffset.y;
+        currentScrollOffsetRef.current = offsetY;
+
+        if (viewMode === 'want') {
+            cachedUserWantScrollOffset = offsetY;
+        } else {
+            cachedUserRatedScrollOffset = offsetY;
+        }
+    };
+
     const loadMovies = useCallback(async () => {
         try {
             setLoading(true);
@@ -246,25 +256,35 @@ export default function UserPageScreen() {
 
     useFocusEffect(
         useCallback(() => {
-            loadMovies();
+            let cancelled = false;
 
-            const timer = setTimeout(() => {
-                const targetOffset =
-                    viewMode === 'want'
-                        ? cachedUserWantScrollOffset
-                        : cachedUserRatedScrollOffset;
+            const restoreAfterLoad = async () => {
+                await loadMovies();
 
-                if (flatListRef.current && targetOffset > 0) {
-                    flatListRef.current.scrollToOffset({
-                        offset: targetOffset,
-                        animated: false,
-                    });
-                    currentScrollOffsetRef.current = targetOffset;
-                }
-            }, 0);
+                if (cancelled) return;
+
+                const timer = setTimeout(() => {
+                    const targetOffset =
+                        viewMode === 'want'
+                            ? cachedUserWantScrollOffset
+                            : cachedUserRatedScrollOffset;
+
+                    if (flatListRef.current && targetOffset > 0) {
+                        flatListRef.current.scrollToOffset({
+                            offset: targetOffset,
+                            animated: false,
+                        });
+                        currentScrollOffsetRef.current = targetOffset;
+                    }
+                }, 0);
+
+                return () => clearTimeout(timer);
+            };
+
+            restoreAfterLoad();
 
             return () => {
-                clearTimeout(timer);
+                cancelled = true;
 
                 if (viewMode === 'want') {
                     cachedUserWantScrollOffset = currentScrollOffsetRef.current;
@@ -274,6 +294,53 @@ export default function UserPageScreen() {
             };
         }, [loadMovies, viewMode])
     );
+
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            const targetOffset =
+                viewMode === 'want'
+                    ? cachedUserWantScrollOffset
+                    : cachedUserRatedScrollOffset;
+
+            if (flatListRef.current) {
+                flatListRef.current.scrollToOffset({
+                    offset: targetOffset,
+                    animated: false,
+                });
+                currentScrollOffsetRef.current = targetOffset;
+            }
+        }, 0);
+
+        return () => clearTimeout(timer);
+    }, [viewMode]);
+
+    useEffect(() => {
+        if (!didMountProviderRef.current) {
+            didMountProviderRef.current = true;
+            return;
+        }
+
+        cachedUserWantScrollOffset = 0;
+        cachedUserRatedScrollOffset = 0;
+        currentScrollOffsetRef.current = 0;
+
+        if (flatListRef.current) {
+            flatListRef.current.scrollToOffset({
+                offset: 0,
+                animated: false,
+            });
+        }
+    }, [selectedProvider]);
+
+    useEffect(() => {
+        if (viewMode === 'rated' && selectedSort === 'predicted') {
+            setSelectedSort('user');
+        }
+
+        if (viewMode === 'want' && selectedSort === 'user') {
+            setSelectedSort('predicted');
+        }
+    }, [viewMode, selectedSort]);
 
     const baseMovies = viewMode === 'want' ? wantMovies : ratedMovies;
 
@@ -304,6 +371,40 @@ export default function UserPageScreen() {
 
         return sortMovies(result, selectedSort);
     }, [baseMovies, selectedGenre, selectedSort]);
+
+    const sortOptions = useMemo(() => {
+        if (viewMode === 'rated') {
+            return [
+                {
+                    label: 'Random',
+                    value: 'random' as SortOption,
+                },
+                {
+                    label: 'User rating: High to low',
+                    value: 'user' as SortOption,
+                },
+                {
+                    label: 'Average rating: High to low',
+                    value: 'average' as SortOption,
+                },
+            ];
+        }
+
+        return [
+            {
+                label: 'Random',
+                value: 'random' as SortOption,
+            },
+            {
+                label: 'Predicted rating: High to low',
+                value: 'predicted' as SortOption,
+            },
+            {
+                label: 'Average rating: High to low',
+                value: 'average' as SortOption,
+            },
+        ];
+    }, [viewMode]);
 
     const handlePressMovie = (movieId: number) => {
         setProviderMenuVisible(false);
@@ -653,20 +754,7 @@ export default function UserPageScreen() {
                             contentContainerStyle={styles.sheetScrollContent}
                             showsVerticalScrollIndicator={false}
                         >
-                            {[
-                                {
-                                    label: 'Predicted rating: High to low',
-                                    value: 'predicted' as SortOption,
-                                },
-                                {
-                                    label: 'Average rating: High to low',
-                                    value: 'average' as SortOption,
-                                },
-                                {
-                                    label: 'Random',
-                                    value: 'random' as SortOption,
-                                },
-                            ].map((option, index, array) => {
+                            {sortOptions.map((option, index, array) => {
                                 const isSelected = option.value === selectedSort;
                                 const isLast = index === array.length - 1;
 
@@ -718,11 +806,12 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     logo: {
-        fontSize: 38,
-        fontWeight: '900',
+        color: '#FFFFFF',
+        fontSize: 55,
         textAlign: 'center',
+        lineHeight: 55,
+        marginBottom: 10,
         marginTop: 55,
-        marginBottom: 18,
     },
     segmentWrapper: {
         height: 36,
@@ -756,21 +845,21 @@ const styles = StyleSheet.create({
     filterRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        marginBottom: 20,
-        paddingHorizontal: 18,
+        marginBottom: 40,
+        paddingHorizontal: 72,
     },
     filterItem: {
         flexDirection: 'row',
         alignItems: 'center',
     },
     filterIcon: {
-        width: 13,
-        height: 13,
+        width: 15,
+        height: 15,
         resizeMode: 'contain',
         marginRight: 4,
     },
     filterText: {
-        fontSize: 11,
+        fontSize: 13,
     },
     listContent: {
         paddingBottom: 140,

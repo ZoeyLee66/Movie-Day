@@ -286,11 +286,11 @@ export async function rebuildPredictionsFromBackend() {
 export async function saveUserRatingAndRefreshPredictions(movieId, userRating) {
     await saveUserRating(movieId, userRating);
 
-    // rated 되면 want_to_watch에서는 제거
     await removeWantToWatch(movieId);
 
     const count = await getUserRatingsCount();
     if (count >= 5) {
+        console.log("repredict all movies")
         await rebuildPredictionsFromBackend();
     }
 }

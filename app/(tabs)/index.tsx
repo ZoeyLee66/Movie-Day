@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,8 @@ import {
   StyleSheet,
   Modal,
   ScrollView,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
 } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { getHomeMovies } from '../../db/database';
@@ -18,10 +20,9 @@ import {
   JockeyOne_400Regular,
 } from '@expo-google-fonts/jockey-one';
 import { Ionicons } from '@expo/vector-icons';
-import { useRef } from 'react';
-import { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 
 let cachedHomeScrollOffset = 0;
+
 const defaultAll = require('../../assets/images/icons/defaultAll.png');
 const defaultGenre = require('../../assets/images/icons/defaultGenre.png');
 const defaultSort = require('../../assets/images/icons/defaultSort.png');
@@ -42,19 +43,8 @@ const selectedDisneyLogo = require('../../assets/images/icons/selectedDisneyLogo
 const selectedNetflixLogo = require('../../assets/images/icons/selectedNetflixLogo.png');
 const selectedDefaultAll = require('../../assets/images/icons/selectedDefaultAll.png');
 
-const flatListRef = useRef<FlatList<Movie>>(null);
-const currentScrollOffsetRef = useRef(0);
-
-const updateScrollOffset = (
-  event: NativeSyntheticEvent<NativeScrollEvent>
-) => {
-  const offsetY = event.nativeEvent.contentOffset.y;
-  currentScrollOffsetRef.current = offsetY;
-  cachedHomeScrollOffset = offsetY;
-};
-
 type Provider = 'defaultAll' | 'Disney+' | 'Netflix';
-type SortOption = 'predicted' | 'average' | 'random';
+type SortOption = 'random' | 'predicted' | 'average';
 
 type Movie = {
   movie_id: number;
@@ -190,6 +180,18 @@ export default function HomeScreen() {
   const [sortModalVisible, setSortModalVisible] = useState(false);
   const [providerMenuVisible, setProviderMenuVisible] = useState(false);
 
+  const flatListRef = useRef<FlatList<Movie>>(null);
+  const currentScrollOffsetRef = useRef(0);
+  const shouldResetScrollRef = useRef(false);
+
+  const updateScrollOffset = (
+    event: NativeSyntheticEvent<NativeScrollEvent>
+  ) => {
+    const offsetY = event.nativeEvent.contentOffset.y;
+    currentScrollOffsetRef.current = offsetY;
+    cachedHomeScrollOffset = offsetY;
+  };
+
   useEffect(() => {
     if (
       providerParam === 'defaultAll' ||
@@ -217,9 +219,12 @@ export default function HomeScreen() {
     try {
       setLoading(true);
       const rows = await getHomeMovies();
-      setMovies(rows ?? []);
+      const safeRows = rows ?? [];
+      setMovies(safeRows);
+      return safeRows;
     } catch (error) {
       console.error('Failed to load home movies:', error);
+      return [];
     } finally {
       setLoading(false);
     }
@@ -231,21 +236,44 @@ export default function HomeScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      setProviderMenuVisible(false);
-      loadMovies();
+      let cancelled = false;
 
-      const timer = setTimeout(() => {
-        if (flatListRef.current && cachedHomeScrollOffset > 0) {
-          flatListRef.current.scrollToOffset({
-            offset: cachedHomeScrollOffset,
-            animated: false,
-          });
-          currentScrollOffsetRef.current = cachedHomeScrollOffset;
-        }
-      }, 0);
+      const restoreAfterLoad = async () => {
+        setProviderMenuVisible(false);
+        await loadMovies();
+
+        if (cancelled) return;
+
+        const timer = setTimeout(() => {
+          if (!flatListRef.current) return;
+
+          if (shouldResetScrollRef.current) {
+            flatListRef.current.scrollToOffset({
+              offset: 0,
+              animated: false,
+            });
+            currentScrollOffsetRef.current = 0;
+            cachedHomeScrollOffset = 0;
+            shouldResetScrollRef.current = false;
+            return;
+          }
+
+          if (cachedHomeScrollOffset > 0) {
+            flatListRef.current.scrollToOffset({
+              offset: cachedHomeScrollOffset,
+              animated: false,
+            });
+            currentScrollOffsetRef.current = cachedHomeScrollOffset;
+          }
+        }, 0);
+
+        return () => clearTimeout(timer);
+      };
+
+      restoreAfterLoad();
 
       return () => {
-        clearTimeout(timer);
+        cancelled = true;
         cachedHomeScrollOffset = currentScrollOffsetRef.current;
       };
     }, [loadMovies])
@@ -390,13 +418,6 @@ export default function HomeScreen() {
       </Text>
 
       <View style={styles.searchWrapper}>
-        <Ionicons
-          name="search"
-          size={14}
-          color="#8E8E93"
-          style={styles.searchIcon}
-        />
-
         <TextInput
           value={searchText}
           onChangeText={(text) => {
@@ -411,7 +432,7 @@ export default function HomeScreen() {
 
         {searchText.trim().length > 0 && (
           <Pressable onPress={() => setSearchText('')}>
-            <Ionicons name="close-circle" size={16} color="#8E8E93" />
+            <Ionicons name="close-circle" size={16} style={[{color: providerColor}]} />
           </Pressable>
         )}
       </View>
@@ -479,6 +500,7 @@ export default function HomeScreen() {
                         isLastOption && styles.providerOptionSlotLast,
                       ]}
                       onPress={() => {
+                        shouldResetScrollRef.current = true;
                         setSelectedProvider(option.key);
                         setProviderMenuVisible(false);
                       }}
@@ -612,16 +634,16 @@ export default function HomeScreen() {
             >
               {[
                 {
+                  label: 'Random',
+                  value: 'random' as SortOption,
+                },
+                {
                   label: 'Predicted rating: High to low',
                   value: 'predicted' as SortOption,
                 },
                 {
                   label: 'Average rating: High to low',
                   value: 'average' as SortOption,
-                },
-                {
-                  label: 'Random',
-                  value: 'random' as SortOption,
                 },
               ].map((option, index, array) => {
                 const isSelected = option.value === selectedSort;
@@ -675,23 +697,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   logo: {
-    fontSize: 38,
-    fontWeight: '900',
+    color: '#FFFFFF',
+    fontSize: 55,
     textAlign: 'center',
-    marginBottom: 18,
+    lineHeight: 55,
+    marginBottom: 10,
     marginTop: 55,
   },
   searchWrapper: {
-    height: 40,
+    height: 45,
+    width: '88%',
+    alignSelf: 'center',
     backgroundColor: '#F2F2F2',
     borderRadius: 999,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 14,
-    marginBottom: 22,
-  },
-  searchIcon: {
-    marginRight: 6,
+    paddingHorizontal: 20,
+    marginBottom: 12,
   },
   searchInput: {
     flex: 1,
@@ -702,22 +724,22 @@ const styles = StyleSheet.create({
   filterRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 20,
-    paddingHorizontal: 18,
+    marginBottom: 40,
+    paddingHorizontal: 38,
   },
   filterItem: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   filterIcon: {
-    width: 13,
-    height: 13,
+    width: 15,
+    height: 15,
     resizeMode: 'contain',
     marginRight: 4,
   },
   filterText: {
     color: '#FFFFFF',
-    fontSize: 11,
+    fontSize: 13,
   },
   listContent: {
     paddingBottom: 140,

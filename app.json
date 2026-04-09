@@ -1,10 +1,10 @@
 {
   "expo": {
-    "name": "movie-day",
+    "name": "Movie Day",
     "slug": "movie-day",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/movieDay.png",
     "scheme": "movieday",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,

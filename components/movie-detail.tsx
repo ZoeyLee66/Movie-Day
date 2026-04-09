@@ -256,7 +256,7 @@ export default function MovieDetail({
                             {movie.avg_rating !== null &&
                                 movie.avg_rating !== undefined && (
                                     <Text style={[{ color: themeColor }]}>
-                                        {' '}avg. {Number(movie.avg_rating).toFixed(1)}
+                                    {' '}(avg. {Number(movie.avg_rating).toFixed(1)})
                                     </Text>
                                 )}
                         </Text>
@@ -328,7 +328,7 @@ const styles = StyleSheet.create({
         width: 34,
         height: 34,
         borderRadius: 17,
-        backgroundColor: '#1C1C1E',
+        backgroundColor: '#1F1F1F',
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: 14,
@@ -368,14 +368,14 @@ const styles = StyleSheet.create({
         marginBottom: 14,
     },
     genreChip: {
-        backgroundColor: '#242424',
+        backgroundColor: '#1F1F1F',
         borderRadius: 999,
         minWidth: 92,
         height: 36,
         paddingHorizontal: 18,
         alignItems: 'center',
         justifyContent: 'center',
-        marginHorizontal: 6,
+        marginHorizontal: 3,
         marginBottom: 8,
     },
     genreText: {
@@ -444,7 +444,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     saveFabIcon: {
-        width: 38,
-        height: 38,
+        width: 30,
+        height: 30,
     },
 });
