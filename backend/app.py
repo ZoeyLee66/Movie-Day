@@ -16,7 +16,7 @@ from pydantic import BaseModel
 load_dotenv()
 
 ROOT = Path(__file__).resolve().parent
-BUNDLE_PATH = ROOT / os.getenv("MODEL_BUNDLE_PATH", "movie_recommender_bundle.pkl")
+BUNDLE_PATH = ROOT / os.getenv("MODEL_BUNDLE_PATH", "movie_recommender.pkl")
 
 MIN_HISTORY_FOR_ROW = 3
 HIGH_RATING_THRESHOLD = 4.0
